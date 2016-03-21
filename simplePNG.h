@@ -1,12 +1,3 @@
-//
-//  PNG.h
-//  PNG
-//
-//  Created by Michael Kwasnicki on 19.03.11.
-//  Copyright 2016 __MyCompanyName__. All rights reserved.
-//
-
-
 #ifndef __PNG_H__
 #define __PNG_H__
 
