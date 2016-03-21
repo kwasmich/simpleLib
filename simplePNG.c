@@ -1,12 +1,3 @@
-//
-//  PNG.c
-//  PNG
-//
-//  Created by Michael Kwasnicki on 19.03.11.
-//  Copyright 2011 __MyCompanyName__. All rights reserved.
-//
-
-
 #include "simplePNG.h"
 
 #include <png.h>
