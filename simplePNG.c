@@ -67,7 +67,7 @@ bool pngIsPNG(const uint8_t * const in_PNG_DATA) {
 
 
 
-bool pngDecode(uint8_t **out_image, uint32_t *out_width, uint32_t *out_height, uint32_t *out_numChannels, const uint8_t * const in_PNG_DATA, const size_t in_PNG_SIZE, const bool in_FLIP_Y) {
+bool pngDecode(uint8_t ** const out_image, uint32_t * const out_width, uint32_t * const out_height, pngChannels * const out_numChannels, pngBitDepth * const out_bitDepth, const uint8_t * const in_PNG_DATA, const size_t in_PNG_SIZE, const bool in_FLIP_Y) {
     png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 
     if (png_ptr == NULL) {
@@ -106,6 +106,7 @@ bool pngDecode(uint8_t **out_image, uint32_t *out_width, uint32_t *out_height, u
             if (bit_depth < 8) {
                 png_set_packing(png_ptr);
                 png_set_expand_gray_1_2_4_to_8(png_ptr);
+                bit_depth = 8;
             }
 
             break;
@@ -137,16 +138,24 @@ bool pngDecode(uint8_t **out_image, uint32_t *out_width, uint32_t *out_height, u
         png_set_tRNS_to_alpha(png_ptr);
     }
 
-    png_set_scale_16(png_ptr);
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    if (bit_depth > 8) {
+        png_set_swap(png_ptr);
+    }
+#endif
+
     png_read_update_info(png_ptr, info_ptr);
-    uint8_t *image = malloc(width * height * numChannels * sizeof(png_byte));
+    uint8_t bytesPerPixel = numChannels * ((bit_depth == 16) ? 2 : 1);
+    uint8_t *image = malloc(width * height * bytesPerPixel * sizeof(png_byte));
     png_byte **png_rows = malloc(height * sizeof(png_byte *));
 
-    for (size_t row = 0; row < height; row++) {
-        if (in_FLIP_Y) {
-            png_rows[height - 1 - row] = &image[row * numChannels * width];
-        } else {
-            png_rows[row] = &image[row * numChannels * width];
+    if (in_FLIP_Y) {
+        for (size_t row = 0; row < height; row++) {
+            png_rows[height - 1 - row] = &image[row * bytesPerPixel * width];
+        }
+    } else {
+        for (size_t row = 0; row < height; row++) {
+            png_rows[row] = &image[row * bytesPerPixel * width];
         }
     }
 
@@ -156,13 +165,14 @@ bool pngDecode(uint8_t **out_image, uint32_t *out_width, uint32_t *out_height, u
     *out_width = width;
     *out_height = height;
     *out_numChannels = numChannels;
+    *out_bitDepth = bit_depth;
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     return true;
 }
 
 
 
-bool pngEncode(uint8_t ** const out_pngData, size_t * out_pngSize, uint8_t * const in_IMAGE, const uint32_t in_WIDTH, const uint32_t in_HEIGHT, const uint32_t in_NUM_CHANNELS) {
+bool pngEncode(uint8_t ** const out_pngData, size_t * out_pngSize, uint8_t * const in_IMAGE, const uint32_t in_WIDTH, const uint32_t in_HEIGHT, const pngChannels in_NUM_CHANNELS, const pngBitDepth in_BIT_DEPTH) {
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 
     if (png_ptr == NULL) {
@@ -183,6 +193,8 @@ bool pngEncode(uint8_t ** const out_pngData, size_t * out_pngSize, uint8_t * con
 
     png_bytep *row_pointers = malloc(in_HEIGHT * sizeof(png_bytep));
     size_t bytes_per_pixel = in_NUM_CHANNELS * sizeof(png_byte);
+    bytes_per_pixel = (in_BIT_DEPTH == kPNG8) ? bytes_per_pixel : bytes_per_pixel;
+    bytes_per_pixel = (in_BIT_DEPTH == kPNG16) ? (bytes_per_pixel * 2) : bytes_per_pixel;
 
     for (size_t k = 0; k < in_HEIGHT; k++) {
         row_pointers[k] = &in_IMAGE[k * in_WIDTH * bytes_per_pixel];
@@ -199,9 +211,19 @@ bool pngEncode(uint8_t ** const out_pngData, size_t * out_pngSize, uint8_t * con
     };
 
     png_set_rows(png_ptr, info_ptr, row_pointers);
-    png_set_IHDR(png_ptr, info_ptr, in_WIDTH, in_HEIGHT, 8, color_type, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_BASE);
+    png_set_IHDR(png_ptr, info_ptr, in_WIDTH, in_HEIGHT, in_BIT_DEPTH, color_type, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_BASE);
     png_set_write_fn(png_ptr, &state, png_write_data_fn, NULL);
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    if (in_BIT_DEPTH == kPNG16) {
+        png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_SWAP_ENDIAN, NULL);
+    } else {
+        png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
+    }
+#else
     png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
+#endif
+
     png_destroy_write_struct(&png_ptr, &info_ptr);
     free(row_pointers);
     *out_pngData = state.buffer;
@@ -234,7 +256,7 @@ bool pngIsPNGFile(const char * const in_FILE_PATH) {
 
 
 
-bool pngRead(uint8_t ** const out_image, uint32_t * const out_width, uint32_t * const out_height, uint32_t * const out_numChannels, const char * const in_FILE_PATH, const bool in_FLIP_Y) {
+bool pngRead(uint8_t ** const out_image, uint32_t * const out_width, uint32_t * const out_height, pngChannels * const out_numChannels, pngBitDepth * const out_bitDepth, const char * const in_FILE_PATH, const bool in_FLIP_Y) {
     FILE * fp = fopen(in_FILE_PATH, "rb");
 
     if (fp == NULL) {
@@ -271,17 +293,17 @@ bool pngRead(uint8_t ** const out_image, uint32_t * const out_width, uint32_t * 
     }
 
     fclose(fp);
-    bool success = pngDecode(out_image, out_width, out_height, out_numChannels, rawData, len, in_FLIP_Y);
+    bool success = pngDecode(out_image, out_width, out_height, out_numChannels, out_bitDepth, rawData, len, in_FLIP_Y);
     free(rawData);
     return success;
 }
 
 
 
-bool pngWrite(const char * const in_FILE_PATH, uint8_t * const in_IMAGE, const uint32_t in_WIDTH, const uint32_t in_HEIGHT, const uint32_t in_NUM_CHANNELS) {
+bool pngWrite(const char * const in_FILE_PATH, uint8_t * const in_IMAGE, const uint32_t in_WIDTH, const uint32_t in_HEIGHT, const pngChannels in_NUM_CHANNELS, const pngBitDepth in_BIT_DEPTH) {
     uint8_t *data;
     size_t size;
-    bool success = pngEncode(&data, &size, in_IMAGE, in_WIDTH, in_HEIGHT, in_NUM_CHANNELS);
+    bool success = pngEncode(&data, &size, in_IMAGE, in_WIDTH, in_HEIGHT, in_NUM_CHANNELS, in_BIT_DEPTH);
 
     if (success) {
         FILE *fp = fopen(in_FILE_PATH, "wb");
