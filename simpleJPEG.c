@@ -31,7 +31,7 @@ bool jpegDecode(uint8_t **out_image, uint32_t *out_width, uint32_t *out_height, 
     JDIMENSION w = cinfo.image_width;
     JDIMENSION h = cinfo.image_height;
     uint32_t c = cinfo.num_components;
-    uint8_t *image = malloc(w * h * c * sizeof(uint8_t));
+    uint8_t *image = (uint8_t *)malloc(w * h * c * sizeof(uint8_t));
     uint8_t *imagePtr = image;
 
     if (in_FLIP_Y) {
@@ -67,7 +67,7 @@ bool jpegEncode(uint8_t ** const out_jpegData, size_t * out_jpegSize, uint8_t * 
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
     JSAMPROW row_pointer[1];
-    size_t outsize = 0;
+    unsigned long outsize = 0;
     uint8_t *outbuffer = NULL;
     cinfo.err = jpeg_std_error(&jerr);
     jpeg_create_compress(&cinfo);
@@ -137,7 +137,7 @@ bool jpegRead(uint8_t ** const out_image, uint32_t * const out_width, uint32_t *
         return false;
     }
 
-    uint8_t *rawData = malloc(len);
+    uint8_t *rawData = (uint8_t *)malloc(len);
     size_t bytes_read = fread(rawData, sizeof(uint8_t), len, fp);
 
     if (bytes_read != len) {
